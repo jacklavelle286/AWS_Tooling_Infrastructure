@@ -1,0 +1,52 @@
+trigger: none
+
+pool:
+  vmImage: ubuntu-latest
+
+parameters:
+  - name: awsServiceConnection
+    type: string
+    default: 'aws-tooling-sc'  # The name of your AWS service connection
+  - name: terraformBackendBucket
+    type: string
+    default: 'aws-s3-backend-tt-tooling'  # S3 bucket name for Terraform backend
+
+variables:
+  TF_STATE_KEY: 'terraform.tfstate'  # Key name for the state file in S3
+
+steps:
+  # Terraform Init
+  - task: TerraformTaskV4@4
+    displayName: 'Initialize Terraform'
+    inputs:
+      provider: 'aws'
+      command: 'init'
+      backendServiceAWS: '${{ parameters.awsServiceConnection }}'
+      backendAWSBucketName: '${{ parameters.terraformBackendBucket }}'
+      backendAWSKey: '$(TF_STATE_KEY)'
+
+  # Terraform Validate
+  - task: TerraformTaskV4@4
+    displayName: 'Validate Terraform Configuration'
+    inputs:
+      provider: 'aws'
+      command: 'validate'
+      environmentServiceNameAWS: '${{ parameters.awsServiceConnection }}'
+
+  # Terraform Plan for Destroy
+  - task: TerraformTaskV4@4
+    displayName: 'Plan Terraform Destroy'
+    inputs:
+      provider: 'aws'
+      command: 'plan'
+      environmentServiceNameAWS: '${{ parameters.awsServiceConnection }}'
+      commandOptions: '-destroy -out=destroyplan'
+
+  # Terraform Apply to Destroy
+  - task: TerraformTaskV4@4
+    displayName: 'Apply Terraform Destroy'
+    inputs:
+      provider: 'aws'
+      command: 'apply'
+      environmentServiceNameAWS: '${{ parameters.awsServiceConnection }}'
+      commandOptions: '-auto-approve destroyplan'

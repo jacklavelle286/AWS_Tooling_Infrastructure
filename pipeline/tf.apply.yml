@@ -1,0 +1,115 @@
+trigger: none
+
+pool:
+  vmImage: ubuntu-latest
+
+parameters:
+  - name: awsServiceConnection
+    type: string
+    default: 'aws-tooling-sc'  # The name of your AWS service connection
+  - name: terraformBackendBucket
+    type: string
+    default: 'aws-s3-backend-tt-tooling'  # S3 bucket name for Terraform backend
+
+variables:
+  TF_STATE_KEY: 'terraform.tfstate'  # Key name for the state file in S3
+
+jobs:
+  - job: TerraformPlanJob
+    displayName: 'Terraform Plan Job'
+    steps:
+      # Terraform Init
+      - task: TerraformTaskV4@4
+        displayName: 'Initialize Terraform'
+        inputs:
+          provider: 'aws'
+          command: 'init'
+          backendServiceAWS: '${{ parameters.awsServiceConnection }}'
+          backendAWSBucketName: '${{ parameters.terraformBackendBucket }}'
+          backendAWSKey: '$(TF_STATE_KEY)'
+
+      # Terraform Validate
+      - task: TerraformTaskV4@4
+        displayName: 'Validate Terraform Configuration'
+        inputs:
+          provider: 'aws'
+          command: 'validate'
+          environmentServiceNameAWS: '${{ parameters.awsServiceConnection }}'
+
+      # Terraform Plan
+      - task: TerraformTaskV4@4
+        displayName: 'Generate Terraform Plan'
+        inputs:
+          provider: 'aws'
+          command: 'plan'
+          environmentServiceNameAWS: '${{ parameters.awsServiceConnection }}'
+          commandOptions: '-out=tfplan -input=false'
+
+      # Publish the Plan File as an Artifact
+      - task: PublishPipelineArtifact@1
+        inputs:
+          targetPath: '$(System.DefaultWorkingDirectory)/tfplan'
+          artifact: 'tfplanArtifact'
+        displayName: 'Publish tfplan Artifact'
+
+  - job: waitForApproval
+    displayName: 'Manual Approval'
+    dependsOn: TerraformPlanJob
+    pool: server
+    timeoutInMinutes: 4320 # job times out in 3 days
+    steps:
+      - task: ManualValidation@0
+        timeoutInMinutes: 1440 # task times out in 1 day
+        inputs:
+          notifyUsers: |
+            test@test.com
+            example@example.com
+          instructions: 'Please validate the Terraform plan and approve to proceed with Apply'
+          onTimeout: 'reject'
+
+  - job: TerraformApplyJob
+    displayName: 'Terraform Apply Job'
+    dependsOn: waitForApproval
+    condition: succeeded()
+    steps:
+      # Download the Plan File Artifact
+      - task: DownloadPipelineArtifact@2
+        inputs:
+          artifact: 'tfplanArtifact'
+          path: '$(System.DefaultWorkingDirectory)'
+        displayName: 'Download tfplan Artifact'
+
+      # Terraform Init
+      - task: TerraformTaskV4@4
+        displayName: 'Initialize Terraform'
+        inputs:
+          provider: 'aws'
+          command: 'init'
+          backendServiceAWS: '${{ parameters.awsServiceConnection }}'
+          backendAWSBucketName: '${{ parameters.terraformBackendBucket }}'
+          backendAWSKey: '$(TF_STATE_KEY)'
+
+      # Terraform Validate
+      - task: TerraformTaskV4@4
+        displayName: 'Validate Terraform Configuration'
+        inputs:
+          provider: 'aws'
+          command: 'validate'
+          environmentServiceNameAWS: '${{ parameters.awsServiceConnection }}'
+
+      # Terraform Plan
+      - task: TerraformTaskV4@4
+        displayName: 'Run Terraform Plan'
+        inputs:
+          provider: 'aws'
+          command: 'plan'
+          environmentServiceNameAWS: '${{ parameters.awsServiceConnection }}'
+
+      # Terraform Apply
+      - task: TerraformTaskV4@4
+        displayName: 'Apply Terraform Changes'
+        inputs:
+          provider: 'aws'
+          command: 'apply'
+          environmentServiceNameAWS: '${{ parameters.awsServiceConnection }}'
+          commandOptions: '-auto-approve -input=false $(System.DefaultWorkingDirectory)/tfplan'

@@ -1,0 +1,40 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template to create an IAM role with admin access, a trust policy limited to a specific IAM user, and an S3 bucket for Terraform backend storage.
+
+Parameters:
+  BuildAccountId:
+    Type: String
+    Default: '123456789100'
+
+    Description: The AWS Account ID of the build account that contains the user who can assume this role.
+
+Resources:
+  # S3 Bucket for Terraform Backend
+  TerraformBackendBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Sub 'tf-backend-${AWS::AccountId}-${AWS::Region}'
+  
+  # IAM Role with Admin Access
+  AdminRole:
+    Type: 'AWS::IAM::Role'
+    Properties: 
+      RoleName: 'TFDeployBuildRole'
+      AssumeRolePolicyDocument: 
+        Version: '2012-10-17'
+        Statement: 
+          - Effect: 'Allow'
+            Principal: 
+              AWS: !Sub 'arn:aws:iam::${BuildAccountId}:user/TT_ADO_Deployment_User'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AdministratorAccess'
+  
+Outputs:
+  RoleArn:
+    Description: The ARN of the created IAM role.
+    Value: !GetAtt AdminRole.Arn
+
+  BucketName:
+    Description: The name of the created S3 bucket for Terraform backend.
+    Value: !Ref TerraformBackendBucket
